@@ -2,11 +2,28 @@ package main
 
 import (
 	"crypto/tls"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"time"
+
+	"github.com/micro/cli"
+)
+
+// Default Timeouts
+const (
+	DialTimeout  = 15 * time.Second
+	ReadTimeout  = 15 * time.Second
+	WriteTimeout = 15 * time.Second
+)
+
+// Default String Values
+const (
+	TCP                   = "tcp"
+	HijackingNotSupported = "hijacking not supported"
 )
 
 func tunnel(destination io.WriteCloser, source io.ReadCloser) {
@@ -16,9 +33,9 @@ func tunnel(destination io.WriteCloser, source io.ReadCloser) {
 }
 
 func tcpConnectHandler(w http.ResponseWriter, r *http.Request) {
-	log.Print(r.RequestURI)
+	log.Printf("[TCPConnect Handler] URI=%s", r.RequestURI)
 
-	destConn, err := net.DialTimeout("tcp", r.Host, 15*time.Second)
+	destConn, err := net.DialTimeout(TCP, r.Host, DialTimeout)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
@@ -28,7 +45,7 @@ func tcpConnectHandler(w http.ResponseWriter, r *http.Request) {
 
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
-		http.Error(w, "hijacking not supported", http.StatusInternalServerError)
+		http.Error(w, HijackingNotSupported, http.StatusInternalServerError)
 		return
 	}
 
@@ -42,7 +59,7 @@ func tcpConnectHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func httpHandler(w http.ResponseWriter, r *http.Request) {
-	log.Print(r.RequestURI)
+	log.Printf("[HTTP Handler] URI=%s", r.RequestURI)
 
 	rsp, err := http.DefaultTransport.RoundTrip(r)
 	if err != nil {
@@ -53,9 +70,7 @@ func httpHandler(w http.ResponseWriter, r *http.Request) {
 	defer rsp.Body.Close()
 
 	copyHeaders(w.Header(), rsp.Header)
-
 	w.WriteHeader(rsp.StatusCode)
-
 	io.Copy(w, rsp.Body)
 }
 
@@ -76,11 +91,35 @@ func handleFunc(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	var proxyPort int
+	app := cli.NewApp()
+	app.Name = "goproxy"
+	app.Usage = "Golang based proxy"
+	app.Version = "1.0.0"
+	app.Flags = []cli.Flag{
+		cli.IntFlag{
+			Name:   "port, p",
+			Value:  8080,
+			Usage:  "Proxy port",
+			EnvVar: "PORT",
+		},
+	}
+	app.Action = func(c *cli.Context) {
+		proxyPort = c.Int("port")
+	}
+
+	err := app.Run(os.Args)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Printf("[INFO] Running proxy on port %d", proxyPort)
+
 	server := &http.Server{
-		Addr:           ":8080",
+		Addr:           fmt.Sprintf(":%d", proxyPort),
 		Handler:        http.HandlerFunc(handleFunc),
-		ReadTimeout:    10 * time.Second,
-		WriteTimeout:   10 * time.Second,
+		ReadTimeout:    ReadTimeout,
+		WriteTimeout:   WriteTimeout,
 		MaxHeaderBytes: 1 << 20,
 		TLSNextProto:   make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
 	}
