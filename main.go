@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/micro/cli"
+	"github.com/urfave/cli"
 )
 
 // Default Timeouts
